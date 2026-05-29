@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: anime-cards-bot
+    runtime: node
+    buildCommand: npm install
+    startCommand: node bot.js
+    envVars:
+      - key: NODE_ENV
+        value: production
