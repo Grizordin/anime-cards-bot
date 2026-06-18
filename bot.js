@@ -104,31 +104,13 @@ async function loginToDomain(origin, returnPath = '/') {
     return cachedCookie;
   }
 
-  const loginPayloads = [
-    {
-      login_name: ANIMESSS_LOGIN,
-      login_password: ANIMESSS_PASSWORD,
-      login: 'submit'
-    },
-    {
-      login_name: ANIMESSS_LOGIN,
-      login_password: ANIMESSS_PASSWORD,
-      login: 'submit',
-      action: 'login'
-    },
-    {
-      login_name: ANIMESSS_LOGIN,
-      login_password: ANIMESSS_PASSWORD,
-      login: 'submit',
-      subaction: 'login'
-    }
-  ];
+  const form = new URLSearchParams({
+    login_name: ANIMESSS_LOGIN,
+    login_password: ANIMESSS_PASSWORD,
+    login: 'submit'
+  });
 
-  const loginUrls = [
-    `${origin}${returnPath}`,
-    `${origin}/`,
-    `${origin}/index.php`
-  ];
+  const loginUrls = [`${origin}/`];
 
   for (const loginUrl of loginUrls) {
     try {
@@ -139,34 +121,27 @@ async function loginToDomain(origin, returnPath = '/') {
       });
       const initialCookie = getCookieHeader(initialRes.headers['set-cookie'] || []);
 
-      for (const payload of loginPayloads) {
-        const form = new URLSearchParams(payload);
-        const res = await axios.post(loginUrl, form.toString(), {
-          timeout: 15000,
-          maxRedirects: 0,
-          validateStatus: status => status >= 200 && status < 400,
-          headers: {
-            ...REQUEST_HEADERS,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Origin: origin,
-            Referer: loginUrl,
-            ...(initialCookie ? { Cookie: initialCookie } : {})
-          }
-        });
-
-        if (looksLikeLoginPage(res.data)) {
-          throw new Error(`форма входа осталась после POST, статус ${res.status}`);
+      const res = await axios.post(loginUrl, form.toString(), {
+        timeout: 15000,
+        maxRedirects: 0,
+        validateStatus: status => status >= 200 && status < 400,
+        headers: {
+          ...REQUEST_HEADERS,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Origin: origin,
+          Referer: loginUrl,
+          ...(initialCookie ? { Cookie: initialCookie } : {})
         }
+      });
 
-        const cookie = mergeCookieHeaders(initialCookie, getCookieHeader(res.headers['set-cookie'] || []));
-        if (!cookie) {
-          throw new Error(`сайт не вернул cookie после входа, статус ${res.status}`);
-        }
-
-        authSessions.set(origin, cookie);
-        console.log(`🔐 Авторизовались на ${origin}`);
-        return cookie;
+      const cookie = mergeCookieHeaders(initialCookie, getCookieHeader(res.headers['set-cookie'] || []));
+      if (!cookie) {
+        throw new Error(`сайт не вернул cookie после входа, статус ${res.status}`);
       }
+
+      authSessions.set(origin, cookie);
+      console.log(`🔐 Отправили вход на ${origin}`);
+      return cookie;
     } catch (e) {
       console.log(`⚠️ Не удалось войти через ${loginUrl}: ${e.message}`);
     }
@@ -229,7 +204,9 @@ async function fetchFromDomainsAuthorized(path, label) {
 }
 
 function looksLikeLoginPage(html) {
-  return html.includes('name="login_name"') || html.includes('id="login_name"');
+  return html.includes('Регистрация посетителя')
+    || html.includes('Авторизация')
+    || html.includes('Для просмотра данной страницы нужно авторизоваться');
 }
 
 async function fetchCards() {
