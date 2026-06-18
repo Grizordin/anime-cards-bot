@@ -72,6 +72,24 @@ function getCookieHeader(setCookieHeaders = []) {
     .join('; ');
 }
 
+function mergeCookieHeaders(...cookieHeaders) {
+  const cookies = new Map();
+
+  for (const header of cookieHeaders) {
+    if (!header) continue;
+    for (const part of header.split(';')) {
+      const cookie = part.trim();
+      const eqIndex = cookie.indexOf('=');
+      if (eqIndex <= 0) continue;
+      cookies.set(cookie.slice(0, eqIndex), cookie.slice(eqIndex + 1));
+    }
+  }
+
+  return [...cookies.entries()]
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
 function hasAuthCredentials() {
   return Boolean(ANIMESSS_LOGIN && ANIMESSS_PASSWORD);
 }
@@ -99,6 +117,13 @@ async function loginToDomain(origin) {
 
   for (const loginUrl of loginUrls) {
     try {
+      const initialRes = await axios.get(loginUrl, {
+        timeout: 15000,
+        validateStatus: status => status >= 200 && status < 400,
+        headers: REQUEST_HEADERS
+      });
+      const initialCookie = getCookieHeader(initialRes.headers['set-cookie'] || []);
+
       const res = await axios.post(loginUrl, form.toString(), {
         timeout: 15000,
         maxRedirects: 0,
@@ -107,11 +132,12 @@ async function loginToDomain(origin) {
           ...REQUEST_HEADERS,
           'Content-Type': 'application/x-www-form-urlencoded',
           Origin: origin,
-          Referer: `${origin}/`
+          Referer: loginUrl,
+          ...(initialCookie ? { Cookie: initialCookie } : {})
         }
       });
 
-      const cookie = getCookieHeader(res.headers['set-cookie'] || []);
+      const cookie = mergeCookieHeaders(initialCookie, getCookieHeader(res.headers['set-cookie'] || []));
       if (!cookie) {
         throw new Error(`сайт не вернул cookie после входа, статус ${res.status}`);
       }
@@ -165,6 +191,10 @@ async function fetchFromDomainsAuthorized(path, label) {
           ...(cookie ? { Cookie: cookie } : {})
         }
       });
+      if (looksLikeLoginPage(res.data)) {
+        authSessions.delete(origin);
+        throw new Error('сайт снова отдал страницу входа после авторизации');
+      }
       console.log(`✅ Подключились к ${label}: ${origin}${path}`);
       return res.data;
     } catch (e) {
