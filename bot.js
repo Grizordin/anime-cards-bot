@@ -92,25 +92,39 @@ async function loginToDomain(origin) {
     login: 'submit'
   });
 
-  const res = await axios.post(`${origin}/index.php`, form.toString(), {
-    timeout: 15000,
-    maxRedirects: 0,
-    validateStatus: status => status >= 200 && status < 400,
-    headers: {
-      ...REQUEST_HEADERS,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Referer: `${origin}/`
-    }
-  });
+  const loginUrls = [
+    `${origin}/`,
+    `${origin}/index.php`
+  ];
 
-  const cookie = getCookieHeader(res.headers['set-cookie'] || []);
-  if (!cookie) {
-    throw new Error('сайт не вернул cookie после входа');
+  for (const loginUrl of loginUrls) {
+    try {
+      const res = await axios.post(loginUrl, form.toString(), {
+        timeout: 15000,
+        maxRedirects: 0,
+        validateStatus: status => status >= 200 && status < 400,
+        headers: {
+          ...REQUEST_HEADERS,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Origin: origin,
+          Referer: `${origin}/`
+        }
+      });
+
+      const cookie = getCookieHeader(res.headers['set-cookie'] || []);
+      if (!cookie) {
+        throw new Error(`сайт не вернул cookie после входа, статус ${res.status}`);
+      }
+
+      authSessions.set(origin, cookie);
+      console.log(`🔐 Авторизовались на ${origin}`);
+      return cookie;
+    } catch (e) {
+      console.log(`⚠️ Не удалось войти через ${loginUrl}: ${e.message}`);
+    }
   }
 
-  authSessions.set(origin, cookie);
-  console.log(`🔐 Авторизовались на ${origin}`);
-  return cookie;
+  throw new Error(`не удалось авторизоваться на ${origin}`);
 }
 
 async function fetchFromDomains(path, label) {
