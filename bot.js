@@ -94,7 +94,7 @@ function hasAuthCredentials() {
   return Boolean(ANIMESSS_LOGIN && ANIMESSS_PASSWORD);
 }
 
-async function loginToDomain(origin) {
+async function loginToDomain(origin, returnPath = '/') {
   if (!hasAuthCredentials()) {
     return '';
   }
@@ -110,10 +110,7 @@ async function loginToDomain(origin) {
     login: 'submit'
   });
 
-  const loginUrls = [
-    `${origin}/`,
-    `${origin}/index.php`
-  ];
+  const loginUrls = [`${origin}/`];
 
   for (const loginUrl of loginUrls) {
     try {
@@ -143,7 +140,7 @@ async function loginToDomain(origin) {
       }
 
       authSessions.set(origin, cookie);
-      console.log(`🔐 Авторизовались на ${origin}`);
+      console.log(`🔐 Отправили вход на ${origin}`);
       return cookie;
     } catch (e) {
       console.log(`⚠️ Не удалось войти через ${loginUrl}: ${e.message}`);
@@ -183,7 +180,7 @@ async function fetchFromDomainsAuthorized(path, label) {
 
   for (const origin of origins) {
     try {
-      const cookie = await loginToDomain(origin);
+      const cookie = await loginToDomain(origin, path);
       const res = await axios.get(`${origin}${path}`, {
         timeout: 15000,
         headers: {
@@ -207,7 +204,9 @@ async function fetchFromDomainsAuthorized(path, label) {
 }
 
 function looksLikeLoginPage(html) {
-  return html.includes('name="login_name"') || html.includes('id="login_name"');
+  return html.includes('Регистрация посетителя')
+    || html.includes('Авторизация')
+    || html.includes('Для просмотра данной страницы нужно авторизоваться');
 }
 
 async function fetchCards() {
