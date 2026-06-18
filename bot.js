@@ -10,6 +10,8 @@ const http = require('http');
 const TOKEN = "8719993437:AAEpJ52sTS0Gw8QgfBIibUc3maaeQuPLU6I";
 const CHAT_ID = "-1002306600001";
 const THREAD_ID = "13048";
+const ANIMESSS_LOGIN = process.env.ANIMESSS_LOGIN || '';
+const ANIMESSS_PASSWORD = process.env.ANIMESSS_PASSWORD || '';
 
 // ==========================================
 // РАНГИ ДЛЯ ОТПРАВКИ
@@ -40,6 +42,7 @@ const REPLACEMENT_KEY_LIMIT = 500;
 const REQUEST_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 };
+const authSessions = new Map();
 
 function loadState() {
   try {
@@ -60,6 +63,54 @@ function saveState(state) {
 function normalizeUrl(url) {
   if (!url) return '';
   return url.startsWith('/') ? `https://animesss.tv${url}` : url;
+}
+
+function getCookieHeader(setCookieHeaders = []) {
+  return setCookieHeaders
+    .map(cookie => cookie.split(';')[0])
+    .filter(Boolean)
+    .join('; ');
+}
+
+function hasAuthCredentials() {
+  return Boolean(ANIMESSS_LOGIN && ANIMESSS_PASSWORD);
+}
+
+async function loginToDomain(origin) {
+  if (!hasAuthCredentials()) {
+    return '';
+  }
+
+  const cachedCookie = authSessions.get(origin);
+  if (cachedCookie) {
+    return cachedCookie;
+  }
+
+  const form = new URLSearchParams({
+    login_name: ANIMESSS_LOGIN,
+    login_password: ANIMESSS_PASSWORD,
+    login: 'submit'
+  });
+
+  const res = await axios.post(`${origin}/index.php`, form.toString(), {
+    timeout: 15000,
+    maxRedirects: 0,
+    validateStatus: status => status >= 200 && status < 400,
+    headers: {
+      ...REQUEST_HEADERS,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: `${origin}/`
+    }
+  });
+
+  const cookie = getCookieHeader(res.headers['set-cookie'] || []);
+  if (!cookie) {
+    throw new Error('сайт не вернул cookie после входа');
+  }
+
+  authSessions.set(origin, cookie);
+  console.log(`🔐 Авторизовались на ${origin}`);
+  return cookie;
 }
 
 async function fetchFromDomains(path, label) {
@@ -84,12 +135,43 @@ async function fetchFromDomains(path, label) {
   throw new Error(`Оба домена недоступны для ${label}`);
 }
 
+async function fetchFromDomainsAuthorized(path, label) {
+  const origins = [
+    'https://animesss.tv',
+    'https://animesss.com'
+  ];
+
+  for (const origin of origins) {
+    try {
+      const cookie = await loginToDomain(origin);
+      const res = await axios.get(`${origin}${path}`, {
+        timeout: 15000,
+        headers: {
+          ...REQUEST_HEADERS,
+          ...(cookie ? { Cookie: cookie } : {})
+        }
+      });
+      console.log(`✅ Подключились к ${label}: ${origin}${path}`);
+      return res.data;
+    } catch (e) {
+      authSessions.delete(origin);
+      console.log(`❌ Недоступен ${label}: ${origin}${path} — ${e.message}`);
+    }
+  }
+
+  throw new Error(`Оба домена недоступны для ${label}`);
+}
+
+function looksLikeLoginPage(html) {
+  return html.includes('name="login_name"') || html.includes('id="login_name"');
+}
+
 async function fetchCards() {
   return fetchFromDomains('/cards/', 'картам');
 }
 
 async function fetchReplacements() {
-  return fetchFromDomains('/history_replacements/', 'истории замен');
+  return fetchFromDomainsAuthorized('/history_replacements/', 'истории замен');
 }
 
 function getRankFromClass($el) {
@@ -254,6 +336,15 @@ async function checkReplacements() {
 
   const replacements = parseReplacements(html);
   if (!replacements.length) {
+    if (!hasAuthCredentials()) {
+      console.log('⚠️ Замены не найдены. Для истории замен нужны ANIMESSS_LOGIN и ANIMESSS_PASSWORD в Render');
+      return;
+    }
+    if (looksLikeLoginPage(html)) {
+      console.log('⚠️ Замены не найдены. Сайт отдал страницу входа, проверь ANIMESSS_LOGIN и ANIMESSS_PASSWORD');
+      authSessions.clear();
+      return;
+    }
     console.log('⚠️ Замены не найдены');
     return;
   }
