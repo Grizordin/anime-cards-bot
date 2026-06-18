@@ -261,6 +261,7 @@ function parseReplacements(html) {
     const image = $card.attr('data-image') || '';
     const mp4 = $card.attr('data-mp4') || '';
     const name = $card.attr('data-name') || $history.find('.card-replace-history__title').first().text().trim();
+    const replacementAuthor = $history.find('.card-replace-history__author a').first().text().trim();
 
     if (id && rank && (image || mp4)) {
       cards.push({
@@ -269,6 +270,7 @@ function parseReplacements(html) {
         image,
         mp4,
         name,
+        replacementAuthor,
         replacementKey: `${id}:${mp4 || image}`
       });
     }
@@ -422,7 +424,10 @@ async function checkReplacements() {
 
   for (const card of toSend) {
     try {
-      await sendCard(card, '#замена');
+      const caption = card.replacementAuthor
+        ? `#замена\nАвтор замены ${card.replacementAuthor}`
+        : '#замена';
+      await sendCard(card, caption);
       await new Promise(r => setTimeout(r, 1000));
     } catch (e) {
       console.error(`❌ Ошибка отправки замены ${card.name}: ${e.message}`);
