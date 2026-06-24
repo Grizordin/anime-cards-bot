@@ -17,6 +17,7 @@ const ANIMESSS_PASSWORD = process.env.ANIMESSS_PASSWORD || '';
 // РАНГИ ДЛЯ ОТПРАВКИ
 // ==========================================
 const SEND_RANKS = ['s', 's_plus', 'ass'];
+const REPLACEMENT_SEND_RANKS = ['a', 's', 's_plus', 'ass'];
 
 // ==========================================
 // ТЕГИ ДЛЯ НОВЫХ КАРТ
@@ -249,18 +250,25 @@ function parseReplacements(html) {
 
   $('.card-replace-history').each((_, el) => {
     const $history = $(el);
+    const $oldSide = $history.find('.card-replace-history__side').filter((_, side) => {
+      const $side = $(side);
+      const badgeText = $side.find('.card-replace-history__badge').first().text().trim().toLowerCase();
+      return $side.find('.card-replace-history__badge--old').length > 0 || badgeText === 'было';
+    }).first();
+
     const $newSide = $history.find('.card-replace-history__side').filter((_, side) => {
       const $side = $(side);
       const badgeText = $side.find('.card-replace-history__badge').first().text().trim().toLowerCase();
       return $side.find('.card-replace-history__badge--new').length > 0 || badgeText === 'стало';
     }).first();
 
-    const $card = $newSide.find('.anime-cards__item').first();
-    const id = parseInt($card.attr('data-id') || '0');
-    const rank = $card.attr('data-rank') || getRankFromClass($history);
-    const image = $card.attr('data-image') || '';
-    const mp4 = $card.attr('data-mp4') || '';
-    const name = $card.attr('data-name') || $history.find('.card-replace-history__title').first().text().trim();
+    const oldCard = parseReplacementCard($oldSide);
+    const newCard = parseReplacementCard($newSide);
+    const id = newCard.id;
+    const rank = newCard.rank || getRankFromClass($history);
+    const image = newCard.image;
+    const mp4 = newCard.mp4;
+    const name = newCard.name || $history.find('.card-replace-history__title').first().text().trim();
     const replacementAuthor = $history.find('.card-replace-history__author a').first().text().trim();
 
     if (id && rank && (image || mp4)) {
@@ -270,6 +278,8 @@ function parseReplacements(html) {
         image,
         mp4,
         name,
+        oldCard,
+        newCard,
         replacementAuthor,
         replacementKey: `${id}:${mp4 || image}`
       });
@@ -277,6 +287,18 @@ function parseReplacements(html) {
   });
 
   return cards;
+}
+
+function parseReplacementCard($side) {
+  const $card = $side.find('.anime-cards__item').first();
+
+  return {
+    id: parseInt($card.attr('data-id') || '0'),
+    rank: $card.attr('data-rank') || getRankFromClass($card),
+    image: $card.attr('data-image') || '',
+    mp4: $card.attr('data-mp4') || '',
+    name: $card.attr('data-name') || ''
+  };
 }
 
 async function sendPhoto(imageUrl, caption) {
@@ -305,6 +327,40 @@ async function sendCard(card, caption) {
     await sendPhoto(card.image, caption);
     console.log(`🖼 Фото отправлено: ${card.name} [${card.rank}]`);
   }
+}
+
+function toTelegramMedia(card, caption) {
+  const media = {
+    type: card.mp4 ? 'video' : 'photo',
+    media: normalizeUrl(card.mp4 || card.image)
+  };
+
+  if (caption) {
+    media.caption = caption;
+  }
+
+  return media;
+}
+
+async function sendReplacement(card) {
+  const caption = card.replacementAuthor
+    ? `#замена\n${card.name}\nАвтор замены ${card.replacementAuthor}\nБыло -> Стало`
+    : `#замена\n${card.name}\nБыло -> Стало`;
+
+  if (card.oldCard && (card.oldCard.image || card.oldCard.mp4)) {
+    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMediaGroup`, {
+      chat_id: CHAT_ID,
+      message_thread_id: THREAD_ID,
+      media: [
+        toTelegramMedia(card.oldCard, caption),
+        toTelegramMedia(card.newCard)
+      ]
+    });
+    console.log(`🔁 Замена отправлена альбомом: ${card.name} [${card.rank}]`);
+    return;
+  }
+
+  await sendCard(card, caption);
 }
 
 // ==========================================
@@ -419,15 +475,12 @@ async function checkReplacements() {
   ].slice(0, REPLACEMENT_KEY_LIMIT);
   saveState(state);
 
-  const toSend = newReplacements.filter(c => SEND_RANKS.includes(c.rank));
-  console.log(`📤 Замен для отправки (${SEND_RANKS.join(', ')}): ${toSend.length}`);
+  const toSend = newReplacements.filter(c => REPLACEMENT_SEND_RANKS.includes(c.rank));
+  console.log(`📤 Замен для отправки (${REPLACEMENT_SEND_RANKS.join(', ')}): ${toSend.length}`);
 
   for (const card of toSend) {
     try {
-      const caption = card.replacementAuthor
-        ? `#замена\nАвтор замены ${card.replacementAuthor}`
-        : '#замена';
-      await sendCard(card, caption);
+      await sendReplacement(card);
       await new Promise(r => setTimeout(r, 1000));
     } catch (e) {
       console.error(`❌ Ошибка отправки замены ${card.name}: ${e.message}`);
